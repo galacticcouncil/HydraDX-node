@@ -43,6 +43,7 @@ primitives = {path = '../primitives', default-features = false}
 orml-currencies = {default-features = false, version = '0.4.1-dev'}
 orml-tokens = {default-features = false, version = '0.4.1-dev'}
 orml-traits = {default-features = false, version = '0.4.1-dev'}
+orml-vesting = {default-features = false, version = '0.4.1-dev'}
 
 # Staking dependencies
 pallet-authority-discovery = {default-features = false, version = '3.0.0'}
@@ -121,6 +122,7 @@ std = [
   'orml-currencies/std',
   'orml-tokens/std',
   'orml-traits/std',
+  'orml-vesting/std',
   'pallet-xyk/std',
   'pallet-xyk-rpc-runtime-api/std',
   'pallet-claims/std',

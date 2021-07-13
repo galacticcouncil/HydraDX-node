@@ -237,6 +237,7 @@ impl Filter<Call> for BaseFilter {
 			| Call::Identity(_)
 			| Call::Offences(_)
 			| Call::Utility(_)
+            | Call::PriceFetch(_)
 			| Call::Sudo(_) => true,
 
 			Call::XYK(_)
@@ -1015,6 +1016,18 @@ impl pallet_scheduler::Config for Runtime {
 	type WeightInfo = ();
 }
 
+parameter_types! {
+    pub GracePeriod: BlockNumber = 2;
+}
+
+impl pallet_price_fetch::Config for Runtime {
+    type AuthorityId = pallet_price_fetch::crypto::TestAuthId;
+    type Call = Call;
+    type Event = Event;
+
+    type GracePeriod = GracePeriod;
+}
+
 impl pallet_randomness_collective_flip::Config for Runtime {}
 
 // Create the runtime by composing the FRAME pallets that were previously configured.
@@ -1066,6 +1079,7 @@ construct_runtime!(
 		Faucet: pallet_faucet::{Pallet, Call, Storage, Config, Event<T>},
 		MultiTransactionPayment: pallet_transaction_multi_payment::{Pallet, Call, Config<T>, Storage, Event<T>},
 		GenesisHistory: pallet_genesis_history::{Pallet, Storage, Config},
+		PriceFetch: pallet_price_fetch::{Pallet, Call, Storage, Event<T>}, 
 	}
 );
 

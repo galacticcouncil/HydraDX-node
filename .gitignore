@@ -30,5 +30,5 @@
 
 *.orig
 
-# Custom chainspec(frido)
-balice*
+# custom chainspec(frido)
+balice*.json*

@@ -107,6 +107,7 @@ members = [
   'pallets/transaction-multi-payment',
   'pallets/genesis-history',
   'pallets/xyk',
+  'pallets/price-fetch',
   'primitives',
   'runtime',
   'utils/build-script-utils'

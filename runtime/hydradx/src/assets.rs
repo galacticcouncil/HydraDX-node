@@ -19,10 +19,11 @@ use super::*;
 use crate::system::NativeAssetId;
 
 use hydradx_adapters::{
-	EmaOraclePriceAdapter, FreezableNFT, MultiCurrencyLockedBalance, OmnipoolHookAdapter, OracleAssetVolumeProvider,
-	PriceAdjustmentAdapter, StableswapHooksAdapter, VestingInfo,
+	inspect::MultiInspectAdapter, EmaOraclePriceAdapter, FreezableNFT, MultiCurrencyLockedBalance, OmnipoolHookAdapter,
+	OracleAssetVolumeProvider, OraclePriceProvider, PriceAdjustmentAdapter, StableswapHooksAdapter, VestingInfo,
 };
 
+use hydradx_adapters::price::AssetFeeOraclePriceProvider;
 use hydradx_adapters::{RelayChainBlockHashProvider, RelayChainBlockNumberProvider};
 use hydradx_traits::{
 	router::PoolType, AccountIdFor, AssetKind, AssetPairAccountIdFor, OnTradeHandler, OraclePeriod, Source,
@@ -89,8 +90,8 @@ impl MutationHooks<AccountId, AssetId, Balance> for CurrencyHooks {
 	type PostDeposit = ();
 	type PreTransfer = ();
 	type PostTransfer = ();
-	type OnNewTokenAccount = AddTxAssetOnAccount<Runtime>;
-	type OnKilledTokenAccount = RemoveTxAssetOnKilled<Runtime>;
+	type OnNewTokenAccount = AddTxAssetOnAccount<Runtime, Balances>;
+	type OnKilledTokenAccount = RemoveTxAssetOnKilled<Runtime, FungibleCurrencies<Runtime>>;
 }
 
 impl orml_tokens::Config for Runtime {
@@ -431,9 +432,6 @@ impl PriceOracle<AssetId> for DummyOraclePriceProvider {
 	}
 }
 
-#[cfg(not(feature = "runtime-benchmarks"))]
-use hydradx_adapters::OraclePriceProvider;
-
 #[cfg(feature = "runtime-benchmarks")]
 pub struct DummySpotPriceProvider;
 #[cfg(feature = "runtime-benchmarks")]
@@ -455,6 +453,7 @@ parameter_types! {
 	pub MaxPriceDifference: Permill = Permill::from_rational(15u32, 1000u32);
 	pub NamedReserveId: NamedReserveIdentifier = *b"dcaorder";
 	pub MaxNumberOfRetriesOnError: u8 = 3;
+	pub DCAOraclePeriod: OraclePeriod = OraclePeriod::Short;
 }
 
 impl pallet_dca::Config for Runtime {
@@ -484,7 +483,13 @@ impl pallet_dca::Config for Runtime {
 	type WeightToFee = WeightToFee;
 	type AmmTradeWeights = RouterWeightInfo;
 	type WeightInfo = weights::dca::HydraWeight<Runtime>;
-	type NativePriceOracle = MultiTransactionPayment;
+	type AssetFeePriceProvider = AssetFeeOraclePriceProvider<
+		NativeAssetId,
+		MultiTransactionPayment,
+		Router,
+		OraclePriceProvider<AssetId, EmaOracle, LRNA>,
+		DCAOraclePeriod,
+	>;
 }
 
 // Provides weight info for the router. Router extrinsics can be executed with different AMMs, so we split the router weights into two parts:
@@ -796,7 +801,6 @@ where
 }
 
 use pallet_currencies::fungibles::FungibleCurrencies;
-
 #[cfg(feature = "runtime-benchmarks")]
 use pallet_stableswap::BenchmarkHelper;
 #[cfg(feature = "runtime-benchmarks")]

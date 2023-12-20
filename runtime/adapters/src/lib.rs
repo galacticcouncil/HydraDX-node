@@ -35,6 +35,7 @@ use hydra_dx_math::{
 	omnipool::types::BalanceUpdate,
 	support::rational::{round_to_rational, Rounding},
 };
+use hydradx_traits::price::PriceProvider;
 use hydradx_traits::router::{PoolType, Trade};
 use hydradx_traits::{
 	liquidity_mining::PriceAdjustment, AggregatedOracle, AggregatedPriceOracle, LockedBalance, NativePriceOracle,
@@ -45,12 +46,13 @@ use pallet_circuit_breaker::WeightInfo;
 use pallet_ema_oracle::{OnActivityHandler, OracleError, Price};
 use pallet_omnipool::traits::{AssetInfo, ExternalPriceProvider, OmnipoolHooks};
 use pallet_stableswap::types::{PoolState, StableswapHooks};
-use pallet_transaction_multi_payment::DepositFee;
 use polkadot_xcm::latest::prelude::*;
 use primitive_types::{U128, U512};
-use primitives::constants::chain::{STABLESWAP_SOURCE, XYK_SOURCE};
+use primitives::constants::chain::XYK_SOURCE;
+use primitives::constants::chain::{CORE_ASSET_ID, STABLESWAP_SOURCE};
 use primitives::{constants::chain::OMNIPOOL_SOURCE, AccountId, AssetId, Balance, BlockNumber, CollectionId};
-use sp_runtime::traits::BlockNumberProvider;
+use sp_runtime::helpers_128bit::multiply_by_rational_with_rounding;
+use sp_runtime::traits::{BlockNumberProvider, One};
 use sp_std::vec::Vec;
 use sp_std::{collections::btree_map::BTreeMap, fmt::Debug, marker::PhantomData};
 use warehouse_liquidity_mining::GlobalFarmData;
@@ -64,6 +66,7 @@ pub mod inspect;
 pub mod xcm_exchange;
 pub mod xcm_execute_filter;
 
+pub mod price;
 #[cfg(test)]
 mod tests;
 
@@ -76,7 +79,7 @@ mod tests;
 pub struct MultiCurrencyTrader<
 	AssetId,
 	Balance: FixedPointOperand + TryInto<u128>,
-	Price: FixedPointNumber,
+	Price: Into<(u128, u128)> + Copy + Ord + Debug,
 	ConvertWeightToFee: WeightToFee<Balance = Balance>,
 	AcceptedCurrencyPrices: NativePriceOracle<AssetId, Price>,
 	ConvertCurrency: Convert<MultiAsset, Option<AssetId>>,
@@ -98,7 +101,7 @@ pub struct MultiCurrencyTrader<
 impl<
 		AssetId,
 		Balance: FixedPointOperand + TryInto<u128>,
-		Price: FixedPointNumber,
+		Price: Into<(u128, u128)> + Copy + Ord + Debug,
 		ConvertWeightToFee: WeightToFee<Balance = Balance>,
 		AcceptedCurrencyPrices: NativePriceOracle<AssetId, Price>,
 		ConvertCurrency: Convert<MultiAsset, Option<AssetId>>,
@@ -124,7 +127,7 @@ impl<
 impl<
 		AssetId,
 		Balance: FixedPointOperand + TryInto<u128>,
-		Price: FixedPointNumber,
+		Price: Into<(u128, u128)> + Copy + Ord + Debug,
 		ConvertWeightToFee: WeightToFee<Balance = Balance>,
 		AcceptedCurrencyPrices: NativePriceOracle<AssetId, Price>,
 		ConvertCurrency: Convert<MultiAsset, Option<AssetId>>,
@@ -153,7 +156,17 @@ impl<
 		);
 		let (asset_loc, price) = self.get_asset_and_price(&payment).ok_or(XcmError::AssetNotFound)?;
 		let fee = ConvertWeightToFee::weight_to_fee(&weight);
-		let converted_fee = price.checked_mul_int(fee).ok_or(XcmError::Overflow)?;
+		//let converted_fee = price.checked_mul_int(fee).ok_or(XcmError::Overflow)?;
+
+		let (n, d) = price.into();
+		let converted_fee = multiply_by_rational_with_rounding(
+			fee.try_into().map_err(|_| XcmError::Overflow)?,
+			n,
+			d,
+			sp_arithmetic::per_things::Rounding::Up,
+		)
+		.ok_or(XcmError::Overflow)?;
+
 		let amount: u128 = converted_fee.try_into().map_err(|_| XcmError::Overflow)?;
 		let required = (Concrete(asset_loc), amount).into();
 		let unused = payment.checked_sub(required).map_err(|_| XcmError::TooExpensive)?;
@@ -178,7 +191,15 @@ impl<
 		self.weight -= weight; // Will not underflow because of `min()` above.
 		let fee = ConvertWeightToFee::weight_to_fee(&weight);
 		if let Some(((asset_loc, price), amount)) = self.paid_assets.iter_mut().next() {
-			let converted_fee: u128 = price.saturating_mul_int(fee).saturated_into();
+			let (n, d) = (*price).into();
+			let converted_fee = multiply_by_rational_with_rounding(
+				fee.saturated_into(),
+				n,
+				d,
+				sp_arithmetic::per_things::Rounding::Up,
+			)?;
+			//let converted_fee = price.saturating_mul_int(fee).saturated_into();
+
 			let refund = converted_fee.min(*amount);
 			*amount -= refund; // Will not underflow because of `min()` above.
 
@@ -199,7 +220,7 @@ impl<
 impl<
 		AssetId,
 		Balance: FixedPointOperand + TryInto<u128>,
-		Price: FixedPointNumber,
+		Price: Into<(u128, u128)> + Copy + Ord + Debug,
 		ConvertWeightToFee: WeightToFee<Balance = Balance>,
 		AcceptedCurrencyPrices: NativePriceOracle<AssetId, Price>,
 		ConvertCurrency: Convert<MultiAsset, Option<AssetId>>,
@@ -227,7 +248,7 @@ impl<
 		Balance: AtLeast32BitUnsigned,
 		Price,
 		C: Convert<MultiLocation, Option<AssetId>>,
-		D: DepositFee<AccountId, AssetId, Balance>,
+		D: frame_support::traits::fungibles::Mutate<AccountId, AssetId = AssetId, Balance = Balance>,
 		F: Get<AccountId>,
 	> TakeRevenue for ToFeeReceiver<AccountId, AssetId, Balance, Price, C, D, F>
 {
@@ -239,7 +260,7 @@ impl<
 			} => {
 				C::convert(loc).and_then(|id| {
 					let receiver = F::get();
-					D::deposit_fee(&receiver, id, amount.saturated_into::<Balance>())
+					D::mint_into(id, &receiver, amount.saturated_into::<Balance>())
 						.map_err(|e| log::trace!(target: "xcm::take_revenue", "Could not deposit fee: {:?}", e))
 						.ok()
 				});
@@ -351,23 +372,19 @@ where
 		.map_err(|(_, e)| e)?;
 
 		match asset.delta_changes.delta_reserve {
-			BalanceUpdate::Increase(amount) => {
-				pallet_circuit_breaker::Pallet::<Runtime>::ensure_add_liquidity_limit(
+			BalanceUpdate::Increase(amount) => pallet_circuit_breaker::Pallet::<Runtime>::ensure_add_liquidity_limit(
+				origin,
+				asset.asset_id.into(),
+				asset.before.reserve.into(),
+				amount.into(),
+			)?,
+			BalanceUpdate::Decrease(amount) => {
+				pallet_circuit_breaker::Pallet::<Runtime>::ensure_remove_liquidity_limit(
 					origin,
 					asset.asset_id.into(),
 					asset.before.reserve.into(),
 					amount.into(),
-				)?;
-			}
-			BalanceUpdate::Decrease(amount) => {
-				if !asset.safe_withdrawal {
-					pallet_circuit_breaker::Pallet::<Runtime>::ensure_remove_liquidity_limit(
-						origin,
-						asset.asset_id.into(),
-						asset.before.reserve.into(),
-						amount.into(),
-					)?;
-				}
+				)?
 			}
 		};
 
@@ -478,7 +495,7 @@ where
 	fn get_price(asset_a: AssetId, asset_b: AssetId) -> Result<Price, Self::Error> {
 		let (price, _) =
 			pallet_ema_oracle::Pallet::<Runtime>::get_price(asset_a, asset_b, Period::get(), OMNIPOOL_SOURCE)
-				.map_err(|_| pallet_omnipool::Error::<Runtime>::InvalidOraclePrice)?;
+				.map_err(|_| pallet_omnipool::Error::<Runtime>::PriceDifferenceTooHigh)?;
 		Ok(price)
 	}
 
@@ -573,10 +590,6 @@ where
 			};
 
 			prices.push(price);
-		}
-
-		if prices.is_empty() {
-			return None;
 		}
 
 		let nominator = prices
@@ -964,5 +977,23 @@ where
 
 	fn on_trade_weight(n: usize) -> Weight {
 		OnActivityHandler::<Runtime>::on_trade_weight().saturating_mul(n as u64)
+	}
+}
+
+pub struct NativePriceProvider<SP, P>(PhantomData<(SP, P)>);
+
+impl<SP, P> NativePriceOracle<AssetId, FixedU128> for NativePriceProvider<SP, P>
+where
+	SP: PriceProvider<AssetId, Price = FixedU128>,
+	P: pallet_transaction_multi_payment::Config,
+	<P as pallet_transaction_multi_payment::Config>::AssetId: From<u32>,
+{
+	fn price(currency: AssetId) -> Option<FixedU128> {
+		if currency == CORE_ASSET_ID {
+			Some(FixedU128::one())
+		} else {
+			//pallet_transaction_multi_payment::Pallet::<P>::get_currency_price(currency.into())
+			SP::get_price(currency, CORE_ASSET_ID)
+		}
 	}
 }

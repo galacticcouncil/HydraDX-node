@@ -316,6 +316,8 @@ fn assets_should_be_trapped_when_assets_are_unknown() {
 fn claim_trapped_asset_should_work() {
 	TestNet::reset();
 
+	set_relaychain_block_number(10);
+
 	// traps asset when asset is not registered yet
 	let asset = trap_asset();
 

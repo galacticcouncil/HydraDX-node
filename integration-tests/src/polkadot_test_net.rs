@@ -23,6 +23,7 @@ use hydradx_runtime::RuntimeOrigin;
 use pallet_evm::AddressMapping;
 use polkadot_primitives::v2::{BlockNumber, MAX_CODE_SIZE, MAX_POV_SIZE};
 use polkadot_runtime_parachains::configuration::HostConfiguration;
+use primitives::constants::chain::OMNIPOOL_SOURCE;
 use sp_core::H160;
 use xcm_emulator::{decl_test_network, decl_test_parachain, decl_test_relay_chain};
 
@@ -309,6 +310,7 @@ pub fn hydra_ext() -> sp_io::TestExternalities {
 	)
 	.unwrap();
 
+	/*
 	pallet_transaction_multi_payment::GenesisConfig::<Runtime> {
 		currencies: vec![
 			(LRNA, Price::from(1)),
@@ -317,6 +319,14 @@ pub fn hydra_ext() -> sp_io::TestExternalities {
 			(BTC, Price::from_inner(134_000_000)),
 			(WETH, Price::from_inner(3_666_754_716_981_130_000)),
 		],
+		account_currencies: vec![],
+	}
+	.assimilate_storage(&mut t)
+	.unwrap();
+
+	 */
+	pallet_transaction_multi_payment::GenesisConfig::<Runtime> {
+		currencies: vec![LRNA, DAI, ACA, BTC, WETH],
 		account_currencies: vec![],
 	}
 	.assimilate_storage(&mut t)
@@ -336,6 +346,18 @@ pub fn hydra_ext() -> sp_io::TestExternalities {
 		&mut t,
 	)
 	.unwrap();
+
+	/*
+	<pallet_ema_oracle::GenesisConfig as GenesisBuild<Runtime>>::assimilate_storage(&pallet_ema_oracle::GenesisConfig {
+		initial_data: vec![
+			(OMNIPOOL_SOURCE,
+			 (ACA,LRNA),
+			 pallet_ema_oracle::Price::one(),
+			hydradx_traits::oracle::Liquidity{ a: 1_000_000_000_000_000_000, b: (1_000_000_000_000) }
+			)]
+	},&mut t).unwrap();
+
+	 */
 
 	let mut ext = sp_io::TestExternalities::new(t);
 	ext.execute_with(|| {

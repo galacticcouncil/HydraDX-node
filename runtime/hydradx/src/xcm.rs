@@ -1,9 +1,8 @@
 use super::*;
 
 use codec::MaxEncodedLen;
-use hydradx_adapters::RelayChainBlockNumberProvider;
 use hydradx_adapters::{MultiCurrencyTrader, ReroutingMultiCurrencyAdapter, ToFeeReceiver};
-use pallet_transaction_multi_payment::DepositAll;
+use hydradx_adapters::{NativePriceProvider, OraclePriceProvider, RelayChainBlockNumberProvider};
 use primitives::AssetId; // shadow glob import of polkadot_xcm::v3::prelude::AssetId
 
 use cumulus_primitives_core::ParaId;
@@ -14,8 +13,12 @@ use frame_support::{
 	PalletId,
 };
 use frame_system::EnsureRoot;
+use hydra_dx_math::ema::EmaPrice;
+use hydradx_adapters::price::AssetFeeOraclePriceProvider;
+use hydradx_traits::OraclePeriod;
 use orml_traits::{location::AbsoluteReserveProvider, parameter_type_with_key};
 use orml_xcm_support::{DepositToAlternative, IsNativeConcrete, MultiNativeAsset};
+use pallet_currencies::fungibles::FungibleCurrencies;
 use pallet_xcm::XcmPassthrough;
 use polkadot_parachain::primitives::Sibling;
 use polkadot_xcm::v3::{prelude::*, Weight as XcmWeight};
@@ -89,6 +92,8 @@ parameter_types! {
 	pub const MaxAssetsForTransfer: usize = 2;
 
 	pub UniversalLocation: InteriorMultiLocation = X2(GlobalConsensus(RelayNetwork::get()), Parachain(ParachainInfo::parachain_id().into()));
+
+	pub XcmFeePriceOraclePeriod: OraclePeriod = OraclePeriod::Short;
 }
 
 pub struct XcmConfig;
@@ -111,11 +116,25 @@ impl Config for XcmConfig {
 	type Trader = MultiCurrencyTrader<
 		AssetId,
 		Balance,
-		Price,
+		EmaPrice,
 		WeightToFee,
-		MultiTransactionPayment,
+		AssetFeeOraclePriceProvider<
+			NativeAssetId,
+			MultiTransactionPayment,
+			Router,
+			OraclePriceProvider<AssetId, EmaOracle, LRNA>,
+			XcmFeePriceOraclePeriod,
+		>,
 		CurrencyIdConvert,
-		ToFeeReceiver<AccountId, AssetId, Balance, Price, CurrencyIdConvert, DepositAll<Runtime>, TreasuryAccount>,
+		ToFeeReceiver<
+			AccountId,
+			AssetId,
+			Balance,
+			Price,
+			CurrencyIdConvert,
+			FungibleCurrencies<Runtime>,
+			TreasuryAccount,
+		>,
 	>;
 
 	type ResponseHandler = PolkadotXcm;

@@ -28,7 +28,7 @@ use frame_support::BoundedVec;
 use frame_support::{assert_ok, parameter_types};
 use frame_system as system;
 use frame_system::{ensure_signed, EnsureRoot};
-use hydradx_traits::{AssetKind, NativePriceOracle, OraclePeriod, PriceOracle, Registry};
+use hydradx_traits::{AssetKind, OraclePeriod, PriceOracle, Registry};
 use orml_traits::{parameter_type_with_key, GetByKey};
 use pallet_currencies::BasicCurrencyAdapter;
 use primitive_types::U128;
@@ -650,14 +650,16 @@ impl Config for Test {
 	type RelayChainBlockHashProvider = ParentHashGetterMock;
 	type AmmTradeWeights = ();
 	type MinimumTradingLimit = MinTradeAmount;
-	type NativePriceOracle = NativePriceOracleMock;
+	type AssetFeePriceProvider = FeeAssetProvider;
 }
 
-pub struct NativePriceOracleMock;
+pub struct FeeAssetProvider;
 
-impl NativePriceOracle<AssetId, FixedU128> for NativePriceOracleMock {
-	fn price(_: AssetId) -> Option<FixedU128> {
-		Some(FixedU128::from_rational(88, 100))
+impl PriceProvider<AssetId> for FeeAssetProvider {
+	type Price = EmaPrice;
+
+	fn get_price(_asset_a: AssetId, _asset_b: AssetId) -> Option<Self::Price> {
+		Some(EmaPrice::new(88, 100))
 	}
 }
 
@@ -679,6 +681,7 @@ use frame_system::pallet_prelude::OriginFor;
 use hydra_dx_math::ema::EmaPrice;
 use hydra_dx_math::to_u128_wrapper;
 use hydra_dx_math::types::Ratio;
+use hydradx_traits::price::PriceProvider;
 use hydradx_traits::router::{ExecutorError, PoolType, RouteProvider, Trade, TradeExecution};
 use pallet_currencies::fungibles::FungibleCurrencies;
 use pallet_omnipool::traits::ExternalPriceProvider;

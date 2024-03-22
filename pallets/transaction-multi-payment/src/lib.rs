@@ -26,6 +26,8 @@ use weights::WeightInfo;
 mod mock;
 
 #[cfg(test)]
+mod invariants;
+#[cfg(test)]
 mod tests;
 mod traits;
 
@@ -51,6 +53,7 @@ use hydradx_traits::{
 };
 use orml_traits::{GetByKey, Happened, MultiCurrency};
 use pallet_transaction_payment::OnChargeTransaction;
+use sp_runtime::Permill;
 use sp_std::{marker::PhantomData, prelude::*};
 
 type AssetIdOf<T> = <<T as Config>::Currencies as MultiCurrency<<T as frame_system::Config>::AccountId>>::CurrencyId;
@@ -61,6 +64,8 @@ pub type Price = FixedU128;
 
 // Re-export pallet items so that they can be accessed from the crate namespace.
 pub use pallet::*;
+
+pub const NATIVE_FEE_DISCOUNT_MULTIPLIER: Permill = Permill::from_percent(90); //We have 10% discount on HDX
 
 #[frame_support::pallet]
 pub mod pallet {
@@ -426,7 +431,7 @@ where
 		call: &<T as frame_system::Config>::RuntimeCall,
 		_info: &DispatchInfoOf<<T as frame_system::Config>::RuntimeCall>,
 		fee: Self::Balance,
-		_tip: Self::Balance,
+		tip: Self::Balance,
 	) -> Result<Self::LiquidityInfo, TransactionValidityError> {
 		if fee.is_zero() {
 			return Ok(None);
@@ -453,13 +458,20 @@ where
 		let price = Pallet::<T>::get_currency_price(currency)
 			.ok_or(TransactionValidityError::Invalid(InvalidTransaction::Payment))?;
 
-		let converted_fee =
+		let mut converted_fee =
 			convert_fee_with_price(fee, price).ok_or(TransactionValidityError::Invalid(InvalidTransaction::Payment))?;
+
+		//Apply 10% discount on HDX
+		if currency == T::NativeAssetId::get() {
+			let fee_without_tip = converted_fee.saturating_sub(tip);
+			let fee_without_tip_discounted = NATIVE_FEE_DISCOUNT_MULTIPLIER.mul_floor(fee_without_tip);
+			converted_fee = fee_without_tip_discounted.saturating_add(tip);
+		};
 
 		match MC::withdraw(currency.into(), who, converted_fee) {
 			Ok(()) => {
 				if currency == T::NativeAssetId::get() {
-					Ok(Some(PaymentInfo::Native(fee)))
+					Ok(Some(PaymentInfo::Native(converted_fee)))
 				} else {
 					Ok(Some(PaymentInfo::NonNative(converted_fee, currency, price)))
 				}
@@ -480,17 +492,23 @@ where
 		tip: Self::Balance,
 		already_withdrawn: Self::LiquidityInfo,
 	) -> Result<(), TransactionValidityError> {
+		//TODO: add issuance tests for evm
 		let fee_receiver = FR::get();
 
 		if let Some(paid) = already_withdrawn {
 			// Calculate how much refund we should return
 			let (currency, refund, fee, tip) = match paid {
-				PaymentInfo::Native(paid_fee) => (
-					T::NativeAssetId::get().into(),
-					paid_fee.saturating_sub(corrected_fee),
-					corrected_fee.saturating_sub(tip),
-					tip,
-				),
+				PaymentInfo::Native(paid_fee) => {
+					let fee_without_tip = corrected_fee.saturating_sub(tip);
+					let fee_without_tip_discounted = NATIVE_FEE_DISCOUNT_MULTIPLIER.mul_floor(fee_without_tip);
+					let corrected_fee = fee_without_tip_discounted.saturating_add(tip);
+					(
+						T::NativeAssetId::get().into(),
+						paid_fee.saturating_sub(corrected_fee),
+						corrected_fee.saturating_sub(tip),
+						tip,
+					)
+				}
 				PaymentInfo::NonNative(paid_fee, currency, price) => {
 					// calculate corrected_fee in the non-native currency
 					let converted_corrected_fee = convert_fee_with_price(corrected_fee, price)

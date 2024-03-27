@@ -83,7 +83,7 @@ impl<R> HydraDXPrecompiles<R> {
 // Same as Moonbean and Centrifuge, should benefit interoperability
 // See also
 // https://docs.moonbeam.network/builders/pallets-precompiles/precompiles/overview/#precompiled-contract-addresses
-const DISPATCH_ADDR: H160 = addr(1025);
+pub const DISPATCH_ADDR: H160 = addr(1025);
 
 pub const ECRECOVER: H160 = H160(hex!("0000000000000000000000000000000000000001"));
 pub const SHA256: H160 = H160(hex!("0000000000000000000000000000000000000002"));

@@ -12,7 +12,7 @@ use cumulus_primitives_core::ParaId;
 use frame_support::{
 	parameter_types,
 	sp_runtime::traits::{AccountIdConversion, Convert},
-	traits::{ConstU32, Contains, Everything, Get, Nothing},
+	traits::{ConstU32, Contains, ContainsPair, Everything, Get, Nothing},
 	PalletId,
 };
 use frame_system::EnsureRoot;
@@ -99,7 +99,57 @@ parameter_types! {
 	pub const MaxNumberOfInstructions: u16 = 100;
 
 	pub UniversalLocation: InteriorMultiLocation = X2(GlobalConsensus(RelayNetwork::get()), Parachain(ParachainInfo::parachain_id().into()));
+
+	pub AssetHubLocation: MultiLocation = (Parent, Parachain(1000)).into();
 }
+
+/// Matches foreign assets from a given origin.
+/// Foreign assets are assets bridged from other consensus systems. i.e parents > 1.
+pub struct IsForeignNativeAssetFrom<Origin>(PhantomData<Origin>);
+impl<Origin> ContainsPair<MultiAsset, MultiLocation> for IsForeignNativeAssetFrom<Origin>
+where
+	Origin: Get<MultiLocation>,
+{
+	fn contains(asset: &MultiAsset, origin: &MultiLocation) -> bool {
+		let loc = Origin::get();
+		&loc == origin
+			&& matches!(
+				asset,
+				MultiAsset {
+					id: Concrete(MultiLocation { parents: 2, .. }),
+					fun: Fungible(_),
+				},
+			)
+	}
+}
+
+/// Matches DOT from given origin, to send directly DOT from origin to Hydra.
+pub struct IsDotFrom<Origin>(PhantomData<Origin>);
+impl<Origin> ContainsPair<MultiAsset, MultiLocation> for IsDotFrom<Origin>
+where
+	Origin: Get<MultiLocation>,
+{
+	fn contains(asset: &MultiAsset, origin: &MultiLocation) -> bool {
+		let loc = Origin::get();
+		&loc == origin
+			&& matches!(
+				asset,
+				MultiAsset {
+					id: Concrete(MultiLocation {
+						parents: 1,
+						interior: Here
+					}),
+					fun: Fungible(_),
+				},
+			)
+	}
+}
+
+pub type Reserves = (
+	IsDotFrom<AssetHubLocation>,
+	IsForeignNativeAssetFrom<AssetHubLocation>,
+	MultiNativeAsset<AbsoluteReserveProvider>,
+);
 
 pub struct XcmConfig;
 impl Config for XcmConfig {
@@ -108,7 +158,7 @@ impl Config for XcmConfig {
 
 	type AssetTransactor = LocalAssetTransactor;
 	type OriginConverter = XcmOriginToCallOrigin;
-	type IsReserve = MultiNativeAsset<AbsoluteReserveProvider>;
+	type IsReserve = Reserves;
 
 	type IsTeleporter = (); // disabled
 	type UniversalLocation = UniversalLocation;
@@ -185,7 +235,7 @@ parameter_type_with_key! {
 	pub ParachainMinFee: |location: MultiLocation| -> Option<u128> {
 		#[allow(clippy::match_ref_pats)] // false positive
 		match (location.parents, location.first_interior()) {
-			(1, Some(Parachain(ASSET_HUB_PARA_ID))) => Some(50_000_000),
+			(1, Some(Parachain(ASSET_HUB_PARA_ID))) => Some(150_000_000),
 			_ => None,
 		}
 	};

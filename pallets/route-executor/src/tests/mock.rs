@@ -165,6 +165,7 @@ impl RefundEdCalculator<Balance> for MockedEdCalculator {
 }
 
 use hydradx_traits::AssetKind;
+
 pub struct MockedAssetRegistry;
 
 impl hydradx_traits::registry::Inspect for MockedAssetRegistry {

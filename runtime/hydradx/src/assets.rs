@@ -221,6 +221,10 @@ impl SufficiencyCheck {
 
 impl OnTransfer<AccountId, AssetId, Balance> for SufficiencyCheck {
 	fn on_transfer(asset: AssetId, from: &AccountId, to: &AccountId, _amount: Balance) -> DispatchResult {
+		if pallet_route_executor::Pallet::<Runtime>::skip_ed_lock() {
+			return Ok(());
+		}
+
 		//NOTE: `to` is paying ED if `from` is whitelisted.
 		//This can happen if pallet's account transfers insufficient tokens to another account.
 		if <Runtime as orml_tokens::Config>::DustRemovalWhitelist::contains(from) {
@@ -240,6 +244,10 @@ impl OnDeposit<AccountId, AssetId, Balance> for SufficiencyCheck {
 pub struct OnKilledTokenAccount;
 impl Happened<(AccountId, AssetId)> for OnKilledTokenAccount {
 	fn happened((who, asset): &(AccountId, AssetId)) {
+		if pallet_route_executor::Pallet::<Runtime>::skip_ed_unlock() {
+			return;
+		}
+
 		if AssetRegistry::is_sufficient(*asset) || frame_system::Pallet::<Runtime>::account(who).sufficients.is_zero() {
 			return;
 		}
@@ -852,6 +860,10 @@ impl RouterWeightInfo {
 			number_of_times_execute_sell_amounts_executed,
 		))
 	}
+
+	pub fn skip_ed_handling_overweight() -> Weight {
+		weights::pallet_route_executor::HydraWeight::<Runtime>::skip_ed_handling_for_trade_with_insufficient_assets()
+	}
 }
 
 impl AmmTradeWeights<Trade<AssetId>> for RouterWeightInfo {
@@ -892,6 +904,16 @@ impl AmmTradeWeights<Trade<AssetId>> for RouterWeightInfo {
 			weight.saturating_accrue(amm_weight);
 		}
 
+		//We add the overweight for skipping ED handling if we have any insufficient asset
+		let mut unique_assets = sp_std::collections::btree_set::BTreeSet::new();
+		for trade in route.iter() {
+			unique_assets.insert(trade.asset_in);
+			unique_assets.insert(trade.asset_out);
+		}
+		if unique_assets.iter().any(|asset| !AssetRegistry::is_sufficient(*asset)) {
+			weight.saturating_accrue(Self::skip_ed_handling_overweight());
+		}
+
 		weight
 	}
 
@@ -930,6 +952,16 @@ impl AmmTradeWeights<Trade<AssetId>> for RouterWeightInfo {
 					.saturating_add(<Runtime as pallet_xyk::Config>::AMMHandler::on_trade_weight()),
 			};
 			weight.saturating_accrue(amm_weight);
+		}
+
+		//We add the overweight for skipping ED handling if we have any insufficient asset
+		let mut unique_assets = sp_std::collections::btree_set::BTreeSet::new();
+		for trade in route.iter() {
+			unique_assets.insert(trade.asset_in);
+			unique_assets.insert(trade.asset_out);
+		}
+		if unique_assets.iter().any(|asset| !AssetRegistry::is_sufficient(*asset)) {
+			weight.saturating_accrue(Self::skip_ed_handling_overweight());
 		}
 
 		weight
